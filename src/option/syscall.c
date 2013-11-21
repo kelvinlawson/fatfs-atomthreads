@@ -3,15 +3,18 @@
 /* (C)ChaN, 2012                                                          */
 /*------------------------------------------------------------------------*/
 
+#include <stdio.h>
 #include <stdlib.h>		/* ANSI memory controls */
-#include <malloc.h>		/* ANSI memory controls */
+
+#include "atom.h"
+#include "atommutex.h"
 
 #include "../ff.h"
 
 
 #if _FS_REENTRANT
 /*------------------------------------------------------------------------*/
-/* Create a Synchronization Object
+/* Create a Synchronization Object */
 /*------------------------------------------------------------------------*/
 /* This function is called in f_mount function to create a new
 /  synchronization object, such as semaphore and mutex. When a FALSE is
@@ -24,22 +27,25 @@ int ff_cre_syncobj (	/* 1:Function succeeded, 0:Could not create due to any erro
 )
 {
 	int ret;
-//	static _SYNC_t sem[_VOLUMES];	/* FreeRTOS */
 
-
-	*sobj = CreateMutex(NULL, FALSE, NULL);		/* Win32 */
-	ret = (*sobj != INVALID_HANDLE_VALUE);
-
-//	*sobj = SyncObjects[vol];		/* uITRON (give a static created sync object) */
-//	ret = 1;						/* The initial value of the semaphore must be 1. */
-
-//	*sobj = OSMutexCreate(0, &err);	/* uC/OS-II */
-//	ret = (err == OS_NO_ERR);
-
-//  if (!sem[vol])					/* FreeRTOS */
-//		sem[vol] = xSemaphoreCreateMutex();
-//	*sobj = sem[vol];
-//	ret = (*sobj != NULL);
+	/* Allocate space for mutex object from heap */
+	if ((*sobj = malloc (sizeof(ATOM_MUTEX))) == NULL)
+	{
+		printf ("SYSCALL: Failed to allocate mutex\n");
+		ret = 0;
+	}
+	/* Initialise mutex */
+	else if (atomMutexCreate(*sobj) != ATOM_OK)
+	{
+		printf ("SYSCALL: Failed to create mutex\n");
+		free (*sobj);
+		ret = 0;
+	}
+	/* Success */
+	else
+	{
+		ret = 1;
+	}
 
 	return ret;
 }
@@ -60,15 +66,18 @@ int ff_del_syncobj (	/* 1:Function succeeded, 0:Could not delete due to any erro
 {
 	int ret;
 
-
-	ret = CloseHandle(sobj);	/* Win32 */
-
-//	ret = 1;					/* uITRON (nothing to do) */
-
-//	OSMutexDel(sobj, OS_DEL_ALWAYS, &err);	/* uC/OS-II */
-//	ret = (err == OS_NO_ERR);
-
-//	ret = 1;					/* FreeRTOS (nothing to do) */
+	/* Delete the mutex */
+	if (atomMutexDelete (sobj) != ATOM_OK)
+	{
+		printf ("SYSCALL: Failed to delete mutex\n");
+		ret = 0;
+	}
+	else
+	{
+		/* Deallocate object space on heap */
+		free (sobj);
+		ret = 1;
+	}
 
 	return ret;
 }
@@ -88,14 +97,17 @@ int ff_req_grant (	/* TRUE:Got a grant to access the volume, FALSE:Could not get
 {
 	int ret;
 
-	ret = (WaitForSingleObject(sobj, _FS_TIMEOUT) == WAIT_OBJECT_0);	/* Win32 */
+	int status;
 
-//	ret = (wai_sem(sobj) == E_OK);				/* uITRON */
-
-//	OSMutexPend(sobj, _FS_TIMEOUT, &err));		/* uC/OS-II */
-//	ret = (err == OS_NO_ERR);
-
-//	ret = (xSemaphoreTake(sobj, _FS_TIMEOUT) == pdTRUE);	/* FreeRTOS */
+	if ((status = atomMutexGet (sobj, _FS_TIMEOUT)) != ATOM_OK)
+	{
+		printf ("SYSCALL: Failed to get mutex (%d)\n", status);
+		ret = FALSE;
+	}
+	else
+	{
+		ret = TRUE;
+	}
 
 	return ret;
 }
@@ -112,13 +124,10 @@ void ff_rel_grant (
 	_SYNC_t sobj	/* Sync object to be signaled */
 )
 {
-	ReleaseMutex(sobj);		/* Win32 */
-
-//	sig_sem(sobj);			/* uITRON */
-
-//	OSMutexPost(sobj);		/* uC/OS-II */
-
-//	xSemaphoreGive(sobj);	/* FreeRTOS */
+	if (atomMutexPut (sobj) != ATOM_OK)
+	{
+		printf ("SYSCALL: Error putting mutex\n");
+	}
 }
 
 #endif
